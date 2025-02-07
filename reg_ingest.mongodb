@@ -1,0 +1,42 @@
+const [dbname, collname] = ["test", "reg"];
+const meta = ["device01", "device02", "device03", "device04", "device05"];
+
+use(dbname);
+
+function* gendocs(nDocs) {
+  let batch = [];
+  const ts = new Date("2025-01-01").getTime();
+  for (let i = 0; i < nDocs; i++) {
+    batch.push({
+      ts: new Date(ts + i),
+      meta: meta[i % meta.length],
+      m1: i,
+      m2: i * 2,
+      m3: i * 3,
+    });
+    if ((i + 1) % 2500 === 0) {
+      yield batch;
+      batch = [];
+    }
+  }
+  if (batch.length > 0) {
+    yield batch;
+  }
+}
+
+// Insert a few documents into the sales collection.
+function ingest(nDocs) {
+  let coll = db.getCollection(collname);
+  coll.drop();
+
+  db.createCollection(collname);
+  coll = db.getCollection(collname);
+  coll.createIndex({ meta: 1, ts: 1 });
+
+  let docs = gendocs(nDocs);
+  for (let batch of docs) {
+    coll.insertMany(batch);
+  }
+}
+
+ingest(50_000 * meta.length);

@@ -1,0 +1,10 @@
+use("test");
+
+const tdate = new Date(new Date("2025-01-01").getTime() + 19);
+let udoc = db.tsc.findOne({ _id: tdate });
+console.log("before", udoc);
+
+db.tsc.deleteOne({ _id: tdate });
+db.tsc.insertOne(udoc);
+udoc = db.tsc.findOne({ _id: tdate });
+console.log("after", udoc);

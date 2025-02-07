@@ -1,0 +1,46 @@
+const [dbname, collname] = ["test", "reg"];
+
+use(dbname);
+const coll = db.getCollection(collname);
+
+let agg = [
+  {
+    $sample: {
+      size: 12_000,
+    },
+  },
+  {
+    $project: {
+      ts: 1,
+      _id: 0,
+    },
+  },
+  {
+    $limit: 200, // sort_merge up to 200
+    // $limit: 400, // range scan & sort if > 200
+  },
+];
+
+let inparam = coll.aggregate(agg).toArray();
+
+agg = [
+  {
+    $match: {
+      $or: inparam,
+    },
+  },
+  {
+    $sort: {
+      meta: 1,
+    },
+  },
+  {
+    $project: {
+      ts: 1,
+      meta: 1,
+      _id: 0,
+    },
+  },
+];
+
+coll.aggregate(agg).explain("executionStats");

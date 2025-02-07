@@ -1,0 +1,45 @@
+const [dbname, collname] = ["test", "tsc"];
+
+use(dbname);
+
+function* gendocs(nDocs) {
+  let batch = [];
+  const ts = new Date("2025-01-02").getTime();
+  for (let i = 0; i < nDocs; i++) {
+    batch.push({
+      _id: new Date(ts + i),
+      meta: "device01",
+      m1: i,
+      m2: i * 2,
+      m3: i * 3,
+    });
+    if ((i + 1) % 2500 === 0) {
+      yield batch;
+      batch = [];
+    }
+  }
+  if (batch.length > 0) {
+    yield batch;
+  }
+}
+
+// Insert a few documents into the sales collection.
+function ingest(nDocs) {
+  let coll = db.getCollection(collname);
+  coll.drop();
+
+  db.createCollection(collname, {
+    timeseries: {
+      timeField: "_id",
+      metaField: "meta",
+    },
+  });
+  coll = db.getCollection(collname);
+
+  let docs = gendocs(nDocs);
+  for (let batch of docs) {
+    coll.insertMany(batch);
+  }
+}
+
+ingest(10000);

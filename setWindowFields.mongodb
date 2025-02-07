@@ -1,0 +1,23 @@
+const [dbname, collname] = ["test", "reg"];
+
+use(dbname);
+
+const agg = [
+  {
+    $match: { meta: "device01" },
+  },
+  {
+    $setWindowFields: {
+      sortBy: { ts: 1 },
+      output: {
+        m2Avg: {
+          $avg: "$m2",
+          window: { range: [-5, 3], unit: "millisecond" },
+        },
+      },
+    },
+  },
+];
+
+const coll = db.getCollection(collname);
+coll.aggregate(agg).explain("executionStats");
