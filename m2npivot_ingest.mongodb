@@ -1,0 +1,83 @@
+const [dbname, collname] = ["test", "n2mpivot"];
+
+use(dbname);
+
+function* genmdocs(nDocs, nStart) {
+  let batch = [];
+  for (let i = nStart; i < nStart + nDocs; i++) {
+    batch.push({
+      _id: i,
+      // type: "m",
+      mid: i,
+      timestamp: null,
+      nid: null,
+    });
+    if ((i + 1) % 2500 === 0) {
+      yield batch;
+      batch = [];
+    }
+  }
+  if (batch.length > 0) {
+    yield batch;
+  }
+}
+
+function* genndocs(nDocs, nStart) {
+  let batch = [];
+  for (let i = nStart; i < nStart + nDocs; i++) {
+    batch.push({
+      _id: i,
+      // type: "n",
+      mid: null,
+      timestamp: nDocs - i + nStart, // 10000 - i + 10001
+      nid: i, // 1
+    });
+    if ((i + 1) % 2500 === 0) {
+      yield batch;
+      batch = [];
+    }
+  }
+  if (batch.length > 0) {
+    yield batch;
+  }
+}
+
+function genpivot(nStart) {
+  let batch = [];
+  let nid;
+  for (let i = 0; i < 100; i++) {
+    nid = Math.floor(Math.random() * 100) + 15000;
+    batch.push({
+      _id: nStart + i,
+      // type: "pivot",
+      mid: Math.floor(Math.random() * 100) + 5000,
+      timestamp: 20001 - nid,
+      nid: nid,
+    });
+  }
+  return batch;
+}
+
+function ingest() {
+  let coll = db.getCollection(collname);
+  coll.drop();
+
+  db.createCollection(collname);
+  coll = db.getCollection(collname);
+
+  let mdocs = genmdocs(10000, 1);
+  for (let batch of mdocs) {
+    coll.insertMany(batch);
+  }
+
+  let ndocs = genndocs(10000, 10001);
+  for (let batch of ndocs) {
+    coll.insertMany(batch);
+  }
+
+  coll.insertMany(genpivot(20001));
+
+  coll.createIndex({ mid: 1, timestamp: 1, nid: 1 });
+}
+
+ingest();
