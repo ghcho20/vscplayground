@@ -1,0 +1,39 @@
+const [dbname, collname] = ["test", "ts2"];
+
+use(dbname);
+
+// random string generator
+function randString() {
+  return Array(297)
+    .join("x")
+    .replace(/x/g, () =>
+      String.fromCharCode(Math.floor(Math.random() * 26) + 97),
+    );
+}
+
+function bulkInsert() {
+  let docs = [];
+  const ts = Date.now();
+  for (let i = 0; i < 100; i++) {
+    docs.push({
+      t: new Date(ts + i * 60000),
+      m: 0,
+      str: randString(),
+    });
+  }
+
+  db.ts2.insertMany(docs);
+}
+
+function loopInsert() {
+  const ts = Date.now();
+  for (let i = 0; i < 100; i++) {
+    db.ts2.insertOne({
+      t: new Date(ts + i * 60000),
+      m: 0,
+      str: randString(),
+    });
+  }
+}
+
+// loopInsert();
