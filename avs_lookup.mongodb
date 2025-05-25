@@ -1,0 +1,48 @@
+// need to connect to MDB_EDU
+const [dbname, collname] = ["sample_mflix", "embedded_movies"];
+
+// import { query_vector } from "./avs_query-vector.js";
+const { query_vector } = require("./avs_query-vector.js");
+
+use(dbname);
+
+const vsearch = {
+  $vectorSearch: {
+    queryVector: query_vector,
+    path: "plot_embedding",
+    numCandidates: 100,
+    index: "vector_index",
+    limit: 10,
+    filter: { year: "$$year" },
+    exact: false,
+  },
+};
+
+const project = {
+  $project: {
+    _id: 0,
+    plot: 1,
+    title: 1,
+    year: 1,
+  },
+};
+
+const match = {
+  $match: {
+    year: 1914,
+  },
+};
+
+const lookupavs = {
+  // not supported
+  $lookup: {
+    from: collname,
+    let: { year: "$year" },
+    pipeline: [vsearch, project],
+    as: "avs_results",
+  },
+};
+
+const pipeline = [match, project, lookupavs];
+
+db.getCollection(collname).aggregate(pipeline);
