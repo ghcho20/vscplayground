@@ -1,0 +1,80 @@
+const mgenerate = require("mgeneratejs");
+
+const [dbname, collreg, colltsc] = [
+  "test",
+  "iot_weather_reg",
+  "iot_weather_tsc",
+];
+
+use(dbname);
+
+const template_doc = {
+  _id: null, // timestamp
+  meta: null,
+  temperature: { $floating: { min: -30, max: 50, fixed: 2 } },
+  humidity: { $floating: { min: 0, max: 100, fixed: 2 } },
+  pressure: { $floating: { min: 950, max: 1050, fixed: 2 } },
+  rainfall: { $floating: { min: 0, max: 100, fixed: 2 } },
+  wind_speed: { $floating: { min: 0, max: 50, fixed: 2 } },
+  wind_direction: { $floating: { min: 0, max: 330, fixed: 2 } },
+};
+
+function* genbatches(nBatch) {
+  let batch = [];
+  let ts = new Date("2025-01-01").getTime();
+  let doc;
+  for (let b = 0; b < nBatch; b++) {
+    doc = mgenerate(template_doc);
+    ts += 1000; // increment by 1 second
+    for (let i = 1, d; i <= 180; i++) {
+      d = { ...doc };
+      d._id = new Date(ts + i); // timestamp
+      d.meta = i.toString().padStart(3, "0");
+      batch.push(d);
+    }
+    yield batch;
+    batch = [];
+  }
+}
+
+function preCollection(collname) {
+  if (collname !== colltsc && collname !== collreg) {
+    return undefined;
+  }
+
+  db.getCollection(collname).drop();
+  if (collname === colltsc) {
+    db.createCollection(collname, {
+      timeseries: {
+        timeField: "_id",
+        metaField: "meta",
+        granularity: "seconds",
+      },
+    });
+  } else {
+    db.createCollection(collname);
+    db.getCollection(collname).createIndex({ meta: 1, _id: 1 });
+  }
+
+  return db.getCollection(collname);
+}
+
+function ingest() {
+  let batches = genbatches(3_000);
+  let ndocs = 0;
+
+  // 237,081 ms / 540,000 docs, index: 27.1MB
+  const coll = preCollection(colltsc);
+  // 156,827 ms / 540,000 docs, index: 19.3MB (+ _id: 15.6MB)
+  // const coll = preCollection(collreg);
+
+  const start_time = Date.now();
+  for (const docs of batches) {
+    coll.insertMany(docs);
+    ndocs += docs.length;
+  }
+  const end_time = Date.now();
+  console.log(`Inserted ${ndocs} documents in ${end_time - start_time} ms`);
+}
+
+ingest();
