@@ -1,0 +1,17 @@
+const sql = `
+  SELECT *
+  FROM iot_weather_reg
+  LIMIT 5
+`;
+
+db.sql(sql);
+
+// db.aggregate([
+//   {
+//     $sql: {
+//       statement: sql,
+//       format: "jdbc",
+//       dialect: "mongosql",
+//     },
+//   },
+// ]);
