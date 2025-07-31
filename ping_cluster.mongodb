@@ -1,0 +1,29 @@
+use("test");
+
+let on = 1;
+while (true) {
+  try {
+    console.log(`ops: ${on++} @ ${new Date()}`);
+    db.test.insertOne({
+      name: "ping_cluster",
+    });
+    sleep(100);
+
+    db.test.deleteOne({
+      name: "ping_cluster",
+    });
+    sleep(100);
+  } catch (e) {
+    if (e.codeName === "NotWritablePrimary") {
+      // If the error is due to not being the primary, we can retry
+      print("Not writable primary, retrying...");
+      sleep(1000); // Wait for a second before retrying
+      continue;
+    } else {
+      // If it's a different error, we log it and break the loop
+      print("Error occurred: " + e);
+      sleep(1000); // Wait for a second before retrying
+      continue;
+    }
+  }
+}
