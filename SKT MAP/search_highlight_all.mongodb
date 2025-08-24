@@ -1,0 +1,53 @@
+use("map");
+
+const pipeline = [
+  {
+    $search: {
+      text: {
+        query: "T우주 상품 중 30GB 데이터 요금제 가입하고 싶어",
+        path: "productName",
+      },
+      highlight: {
+        path: "productName",
+      },
+    },
+  },
+  {
+    $project: {
+      hits: { $meta: "searchHighlights" },
+    },
+  },
+  {
+    $set: {
+      hits: {
+        $map: {
+          input: "$hits",
+          as: "hit",
+          in: {
+            $filter: {
+              input: "$$hit.texts",
+              as: "t",
+              cond: { $eq: ["$$t.type", "hit"] },
+            },
+          },
+        },
+      },
+    },
+  },
+  {
+    $set: {
+      hits: {
+        $reduce: {
+          input: "$hits",
+          initialValue: [],
+          in: {
+            $concatArrays: ["$$value", "$$this"],
+          },
+        },
+      },
+    },
+  },
+  { $limit: 10 },
+];
+
+db.products.aggregate(pipeline).toArray();

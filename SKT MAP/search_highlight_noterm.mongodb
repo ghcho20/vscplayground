@@ -1,0 +1,54 @@
+use("map");
+
+const pipeline = [
+  {
+    $search: {
+      text: {
+        query: "noterm",
+        path: ["productName", "productDescription"],
+        synonyms: "noterm",
+      },
+      highlight: {
+        path: ["productName", "productDescription"],
+      },
+    },
+  },
+  {
+    $project: {
+      hits: { $meta: "searchHighlights" },
+    },
+  },
+  {
+    $set: {
+      hits: {
+        $map: {
+          input: "$hits",
+          as: "hit",
+          in: {
+            $filter: {
+              input: "$$hit.texts",
+              as: "t",
+              cond: { $eq: ["$$t.type", "hit"] },
+            },
+          },
+        },
+      },
+    },
+  },
+  {
+    $set: {
+      hits: {
+        $reduce: {
+          input: "$hits",
+          initialValue: [],
+          in: {
+            $concatArrays: ["$$value", "$$this"],
+          },
+        },
+      },
+    },
+  },
+  { $limit: 10 },
+];
+
+db.products.aggregate(pipeline).toArray();

@@ -1,0 +1,390 @@
+use("map");
+
+// const query = "T우주 상품 중 30GB 데이터 요금제 가입하고 싶어";
+const query = "5g 요금제 추천해줘";
+// const query = "가족과 함께 가입할 요금제";
+
+/*****************************************************
+ * Indexes
+prodname = {
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "productName": [
+        {
+          "foldDiacritics": false,
+          "type": "autocomplete"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "synonyms": [
+    {
+      "name": "stopword",
+      "analyzer": "lucene.standard",
+      "source": {
+        "collection": "syn_stopword"
+      }
+    }
+  ]
+}
+
+proddesc = {
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "productDescription": [
+        {
+          "type": "autocomplete",
+          "maxGrams": 32,
+          "minGrams": 1,
+          "foldDiacritics": false
+        },
+        {
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "analyzer": "lucene.nori",
+  "searchAnalyzer": "lucene.nori",
+  "synonyms": [
+    {
+      "name": "stopword",
+      "analyzer": "lucene.nori",
+      "source": {
+        "collection": "syn_stopword"
+      }
+    }
+  ]
+}
+*/
+
+/*****************************************************
+ * Synonyms Collections
+{ // exclude docs from search results(docs)
+  mappingType: "equivalent",
+  synonyms: [
+    "mustnot",
+    "가입 불가",
+    "가입 중단"
+  ]
+}
+
+{ // exclude stopwords from search result(within doc)
+  mappingType: "equivalent",
+  synonyms: [
+    "noterm",
+    "추천",
+    "가입",
+    "중",
+    "요금제",
+  ]
+}
+ */
+
+/*****************************************************
+ * 불용어 필터 검색
+ */
+
+// identify all match tokens in the query
+const sift_query_into_allmatch_terms = (q, indexName, path) => {
+  return [
+    {
+      $search: {
+        index: indexName,
+        compound: {
+          must: [
+            {
+              text: {
+                query: q,
+                path: path,
+              },
+            },
+          ],
+          mustNot: [
+            {
+              text: {
+                query: "mustnot",
+                path: path,
+                synonyms: "stopword",
+              },
+            },
+          ],
+        },
+        highlight: { path: path },
+      },
+    },
+  ];
+};
+
+// identify all unwanted tokens in the query
+const sift_query_into_nosearch_terms = (indexName, path) => {
+  return [
+    {
+      $search: {
+        index: indexName,
+        text: {
+          query: "noterm",
+          path: path,
+          synonyms: "stopword",
+        },
+        highlight: { path: path },
+      },
+    },
+  ];
+};
+
+const extract_hit_terms_to_doc = (includeScore) => {
+  const add_terms_to_doc = (includeScore) => {
+    let project = {
+      hits: { $meta: "searchHighlights" },
+    };
+    if (includeScore) {
+      project.productName = 1;
+      project.productDescription = 1;
+      project.score = { $meta: "searchScore" };
+    } else {
+      project._id = 0;
+    }
+
+    return {
+      $project: project,
+    };
+  };
+
+  // filter out only hit terms from the highlights
+  const filter_hit_terms = () => {
+    return {
+      $set: {
+        hits: {
+          $map: {
+            input: "$hits",
+            as: "hit",
+            in: {
+              $filter: {
+                input: "$$hit.texts",
+                as: "t",
+                cond: { $eq: ["$$t.type", "hit"] },
+              },
+            },
+          },
+        },
+      },
+    };
+  };
+
+  const unique_hit_terms = () => {
+    return {
+      $set: {
+        hits: {
+          $reduce: {
+            input: "$hits",
+            initialValue: [],
+            in: {
+              $setUnion: ["$$value", "$$this"],
+            },
+          },
+        },
+      },
+    };
+  };
+
+  return [
+    add_terms_to_doc(includeScore),
+    filter_hit_terms(),
+    unique_hit_terms(),
+  ];
+};
+
+const allmatch_terms = (query, indexName, path, limit) => {
+  return sift_query_into_allmatch_terms(query, indexName, path)
+    .concat(extract_hit_terms_to_doc(true))
+    .concat([{ $limit: limit }]);
+};
+
+const allmatch_terms_exclude_mustnot = (query, indexName, path, limit) => {
+  return sift_query_into_allmatch_terms(query, indexName, path)
+    .concat(extract_hit_terms_to_doc(true))
+    .concat([{ $limit: limit }]);
+};
+
+const join_allmatch_terms_with_nosearch_terms = (indexName, path) => {
+  return [
+    {
+      $lookup: {
+        from: "products",
+        localField: "_id",
+        foreignField: "_id",
+        as: "join",
+        pipeline: sift_query_into_nosearch_terms(indexName, path).concat(
+          extract_hit_terms_to_doc(false),
+        ),
+      },
+    },
+  ];
+};
+
+const allmatch_terms_minus_nosearch_terms = () => {
+  return [
+    {
+      $set: {
+        hits: {
+          $setDifference: [
+            "$hits",
+            {
+              $cond: [
+                { $gt: [{ $size: "$join" }, 0] },
+                {
+                  $getField: {
+                    field: "hits",
+                    input: { $arrayElemAt: ["$join", 0] },
+                  },
+                },
+                [],
+              ],
+            },
+          ],
+        },
+        join: "$$REMOVE",
+      },
+    },
+  ];
+};
+
+const rescore_by_searchterms = () => {
+  return [
+    {
+      $set: {
+        score: {
+          $multiply: [{ $size: "$hits" }, { $meta: "searchScore" }],
+        },
+      },
+    },
+    {
+      $match: {
+        score: { $gt: 0 },
+      },
+    },
+    {
+      $sort: { score: -1 },
+    },
+  ];
+};
+
+const search_name = allmatch_terms(query, "prodname", "productName", 5)
+  .concat(join_allmatch_terms_with_nosearch_terms("prodname", "productName"))
+  .concat(allmatch_terms_minus_nosearch_terms())
+  .concat(rescore_by_searchterms());
+
+const search_desc = allmatch_terms_exclude_mustnot(
+  query,
+  "default",
+  "productDescription",
+  5,
+)
+  .concat(
+    join_allmatch_terms_with_nosearch_terms("proddesc", "productDescription"),
+  )
+  .concat(allmatch_terms_minus_nosearch_terms())
+  .concat(rescore_by_searchterms());
+
+// db.products.aggregate(search_name).toArray();
+
+/*****************************************************
+ * Hybrid Search
+ */
+
+const score_by_rank = (search_pipeline, weight) => {
+  return search_pipeline.concat([
+    {
+      $group: {
+        _id: null,
+        docs: {
+          $push: "$$ROOT",
+        },
+      },
+    },
+    {
+      $unwind: {
+        path: "$docs",
+        includeArrayIndex: "rank",
+      },
+    },
+    {
+      $replaceRoot: {
+        newRoot: {
+          $mergeObjects: [
+            "$docs",
+            {
+              rank: "$rank",
+            },
+          ],
+        },
+      },
+    },
+    {
+      $set: {
+        score: { $divide: [weight, { $add: ["$rank", 1] }] },
+      },
+    },
+  ]);
+};
+
+const hybrid_search = (w1, w2) => {
+  return score_by_rank(search_name, w1)
+    .concat([
+      {
+        $unionWith: {
+          coll: "products",
+          pipeline: score_by_rank(search_desc, w2),
+        },
+      },
+    ])
+    .concat([
+      // merge two search results
+      {
+        $group: {
+          _id: "$_id",
+          docs: {
+            $push: "$$ROOT",
+          },
+          hybrid_score: {
+            $sum: "$score",
+          },
+        },
+      },
+      {
+        $sort: { hybrid_score: -1 },
+      },
+    ])
+    .concat([
+      // project
+      {
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: [
+              {
+                $arrayElemAt: ["$docs", 0],
+              },
+              {
+                hybrid_score: "$hybrid_score",
+              },
+            ],
+          },
+        },
+      },
+      {
+        $set: {
+          hits: "$$REMOVE",
+          rank: "$$REMOVE",
+          score: "$$REMOVE",
+        },
+      },
+    ]);
+};
+
+db.products.aggregate(hybrid_search(0.8, 0.2)).toArray();
