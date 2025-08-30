@@ -1,7 +1,7 @@
 use("map");
 
-// const query = "T우주 상품 중 30GB 데이터 요금제 가입하고 싶어";
-const query = "5g 요금제 추천해줘";
+const query = "T우주 상품 중 30GB 데이터 요금제 가입하고 싶어";
+// const query = "5g 요금제 추천해줘";
 // const query = "가족과 함께 가입할 요금제";
 
 /*****************************************************
@@ -177,7 +177,7 @@ const extract_hit_terms_to_doc = (includeScore) => {
     };
   };
 
-  const unique_hit_terms = () => {
+  const hit_terms = () => {
     return {
       $set: {
         hits: {
@@ -185,7 +185,7 @@ const extract_hit_terms_to_doc = (includeScore) => {
             input: "$hits",
             initialValue: [],
             in: {
-              $setUnion: ["$$value", "$$this"],
+              $concatArrays: ["$$value", "$$this"],
             },
           },
         },
@@ -193,11 +193,7 @@ const extract_hit_terms_to_doc = (includeScore) => {
     };
   };
 
-  return [
-    add_terms_to_doc(includeScore),
-    filter_hit_terms(),
-    unique_hit_terms(),
-  ];
+  return [add_terms_to_doc(includeScore), filter_hit_terms(), hit_terms()];
 };
 
 const allmatch_terms = (query, indexName, path, limit) => {
@@ -228,39 +224,47 @@ const join_allmatch_terms_with_nosearch_terms = (indexName, path) => {
   ];
 };
 
-const allmatch_terms_minus_nosearch_terms = () => {
-  return [
-    {
-      $set: {
-        hits: {
-          $setDifference: [
-            "$hits",
-            {
-              $cond: [
-                { $gt: [{ $size: "$join" }, 0] },
-                {
-                  $getField: {
-                    field: "hits",
-                    input: { $arrayElemAt: ["$join", 0] },
-                  },
-                },
-                [],
-              ],
-            },
-          ],
-        },
-        join: "$$REMOVE",
-      },
-    },
-  ];
-};
-
 const rescore_by_searchterms = () => {
   return [
     {
       $set: {
+        join: {
+          $cond: [
+            {
+              $gt: [{ $size: "$join" }, 0],
+            },
+            {
+              $getField: {
+                field: "hits",
+                input: {
+                  $arrayElemAt: ["$join", 0],
+                },
+              },
+            },
+            [],
+          ],
+        },
+      },
+    },
+    {
+      $set: {
         score: {
-          $multiply: [{ $size: "$hits" }, { $meta: "searchScore" }],
+          $subtract: [
+            "$score",
+            {
+              $multiply: [
+                { $size: "$join" },
+                {
+                  $divide: [
+                    "$score",
+                    {
+                      $size: "$hits",
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
         },
       },
     },
@@ -277,7 +281,6 @@ const rescore_by_searchterms = () => {
 
 const search_name = allmatch_terms(query, "prodname", "productName", 5)
   .concat(join_allmatch_terms_with_nosearch_terms("prodname", "productName"))
-  .concat(allmatch_terms_minus_nosearch_terms())
   .concat(rescore_by_searchterms());
 
 const search_desc = allmatch_terms_exclude_mustnot(
@@ -287,12 +290,11 @@ const search_desc = allmatch_terms_exclude_mustnot(
   5,
 )
   .concat(
-    join_allmatch_terms_with_nosearch_terms("proddesc", "productDescription"),
+    join_allmatch_terms_with_nosearch_terms("default", "productDescription"),
   )
-  .concat(allmatch_terms_minus_nosearch_terms())
   .concat(rescore_by_searchterms());
 
-// db.products.aggregate(search_name).toArray();
+db.products.aggregate(search_desc).toArray();
 
 /*****************************************************
  * Hybrid Search
@@ -387,4 +389,4 @@ const hybrid_search = (w1, w2) => {
     ]);
 };
 
-db.products.aggregate(hybrid_search(0.8, 0.2)).toArray();
+// db.products.aggregate(hybrid_search(0.8, 0.2)).toArray();
